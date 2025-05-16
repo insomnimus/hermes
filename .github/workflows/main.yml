@@ -1,0 +1,215 @@
+{
+  "name": "main",
+  "on": {
+    "push": {
+      "paths-ignore": [
+        "readme.md",
+        "LICENSE"
+      ]
+    },
+    "pull_request": {
+      "paths-ignore": [
+        "readme.md",
+        "LICENSE"
+      ]
+    }
+  },
+  "jobs": {
+    "test": {
+      "strategy": {
+        "matrix": {
+          "include": [
+            {
+              "os": "ubuntu-latest",
+              "target": "x86_64-unknown-linux-gnu"
+            },
+            {
+              "os": "macOS-latest",
+              "target": "x86_64-apple-darwin"
+            },
+            {
+              "os": "windows-latest",
+              "target": "x86_64-pc-windows-msvc"
+            }
+          ]
+        }
+      },
+      "runs-on": "${{ matrix.os }}",
+      "steps": [
+        {
+          "name": "checkout",
+          "uses": "actions/checkout@v4"
+        },
+        {
+          "name": "update rust",
+          "run": "rustup update && rustup target add ${{ matrix.target }}"
+        },
+        {
+          "name": "run tests",
+          "run": "cargo test --target ${{ matrix.target }}"
+        }
+      ]
+    },
+    "build": {
+      "name": "Build Release Binaries",
+      "needs": "test",
+      "if": "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')",
+      "continue-on-error": true,
+      "strategy": {
+        "fail-fast": false,
+        "matrix": {
+          "include": [
+            {
+              "name": "hermes-i686-pc-windows-msvc.zip",
+              "target": "i686-pc-windows-msvc",
+              "os": "windows-latest",
+              "native": true
+            },
+            {
+              "name": "hermes-x86_64-pc-windows-msvc.zip",
+              "target": "x86_64-pc-windows-msvc",
+              "os": "windows-latest",
+              "native": true
+            },
+            {
+              "name": "hermes-aarch64-pc-windows-msvc.zip",
+              "target": "aarch64-pc-windows-msvc",
+              "os": "windows-latest",
+              "native": true
+            },
+            {
+              "name": "hermes-x86_64-unknown-linux-musl.tar.xz",
+              "target": "x86_64-unknown-linux-musl",
+              "os": "ubuntu-latest",
+              "native": false
+            },
+            {
+              "name": "hermes-i686-unknown-linux-musl.tar.xz",
+              "target": "i686-unknown-linux-musl",
+              "os": "ubuntu-latest",
+              "native": false
+            },
+            {
+              "name": "hermes-aarch64-unknown-linux-musl.tar.xz",
+              "target": "aarch64-unknown-linux-musl",
+              "os": "ubuntu-latest",
+              "native": false
+            },
+            {
+              "name": "hermes-armv7-unknown-linux-musleabihf.tar.xz",
+              "target": "armv7-unknown-linux-musleabihf",
+              "os": "ubuntu-latest",
+              "native": false
+            },
+            {
+              "name": "hermes-arm-unknown-linux-musleabihf.tar.xz",
+              "target": "arm-unknown-linux-musleabihf",
+              "os": "ubuntu-latest",
+              "native": false
+            },
+            {
+              "name": "hermes-x86_64-unknown-linux-gnu.tar.xz",
+              "target": "x86_64-unknown-linux-gnu",
+              "os": "ubuntu-latest",
+              "native": true
+            },
+            {
+              "name": "hermes-x86_64-apple-darwin.tar.xz",
+              "target": "x86_64-apple-darwin",
+              "os": "macos-latest",
+              "native": true
+            },
+            {
+              "name": "hermes-aarch64-apple-darwin.tar.xz",
+              "target": "aarch64-apple-darwin",
+              "os": "macos-latest",
+              "native": true
+            }
+          ]
+        }
+      },
+      "runs-on": "${{ matrix.os }}",
+      "steps": [
+        {
+          "name": "checkout",
+          "uses": "actions/checkout@v4"
+        },
+        {
+          "name": "cache cargo",
+          "uses": "actions/cache@v4",
+          "with": {
+            "path": "~/.cargo/registry\n~/.cargo/git\n",
+            "key": "${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}"
+          }
+        },
+        {
+          "name": "setup rustup (native)",
+          "if": "matrix.native",
+          "run": "rustup target add ${{ matrix.target }} && rustup default nightly && rustup component add rust-src"
+        },
+        {
+          "name": "setup rustup (cross)",
+          "if": "!matrix.native",
+          "run": "rustup update && rustup default nightly && rustup component add rust-src && RUSTFLAGS=-O1 cargo install cross"
+        },
+        {
+          "name": "build (native)",
+          "if": "matrix.native",
+          "run": "cargo rustc --release --target ${{ matrix.target }} '-Zbuild-std=core,alloc,std,panic_abort' -- -Ccodegen-units=1"
+        },
+        {
+          "name": "build (cross)",
+          "if": "!matrix.native",
+          "run": "cross rustc --release --target ${{ matrix.target }} ${{ matrix.target == 'x86_64-unknown-linux-musl' && '-Zbuild-std=core,alloc,std,panic_abort' || '' }} -- -Ccodegen-units=1"
+        },
+        {
+          "name": "archive executable",
+          "if": "matrix.os != 'windows-latest'",
+          "run": "cd target/${{ matrix.target }}/release\ntar cJf ../../../${{ matrix.name }} hermes\ncd -"
+        },
+        {
+          "name": "archive executable",
+          "if": "matrix.os == 'windows-latest'",
+          "run": "cd target/${{ matrix.target }}/release\n7z a ../../../${{ matrix.name }} hermes.exe\ncd -"
+        },
+        {
+          "name": "upload artifacts",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "${{ matrix.name }}",
+            "path": "${{ matrix.name }}"
+          }
+        }
+      ]
+    },
+    "release": {
+      "name": "Create GitHub Release",
+      "needs": "build",
+      "if": "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "name": "checkout",
+          "uses": "actions/checkout@v4",
+          "with": {
+            "fetch-depth": 0
+          }
+        },
+        {
+          "name": "download artifacts",
+          "uses": "actions/download-artifact@v4",
+          "with": {
+            "path": "./artifacts"
+          }
+        },
+        {
+          "name": "create github release",
+          "env": {
+            "GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
+          },
+          "run": "gh release create ${{ github.ref_name }} ./artifacts/*/* --generate-notes --title ${{ github.ref_name }}"
+        }
+      ]
+    }
+  }
+}
