@@ -23,6 +23,27 @@ macro_rules! err {
 	};
 }
 
+fn trim_string(buf: &mut String) {
+	if let Some(last_non_space) = buf.rfind(|c: char| !c.is_whitespace()) {
+		buf.truncate(
+			last_non_space
+				+ buf[last_non_space..]
+					.chars()
+					.next()
+					.map_or(0, |c| c.len_utf8()),
+		);
+	}
+
+	if let Some(start) = buf.find(|c: char| !c.is_whitespace()).filter(|&i| i > 0) {
+		// Copy from within the string and then truncate it.
+		unsafe {
+			let v = buf.as_mut_vec();
+			v.copy_within(start.., 0);
+			v.truncate(v.len() - start);
+		}
+	}
+}
+
 pub struct Parser<'a> {
 	lines: &'a [&'a str],
 	ln: usize,
@@ -101,13 +122,18 @@ fn parse_str(input: &str) -> Result<(&str, String)> {
 		}
 
 		debug_assert!(!buf.is_empty());
+
+		trim_string(&mut buf);
 		return Ok((&input[end + 1..], buf));
 	}
 
 	let _ = chars.next().unwrap();
 	while let Some((i, c)) = chars.next() {
 		match c {
-			'"' => return Ok((&input[i + 1..], buf)),
+			'"' => {
+				trim_string(&mut buf);
+				return Ok((&input[i + 1..], buf));
+			}
 			'\\' => {
 				let Some((_, esc)) = chars.next() else {
 					break;
@@ -134,7 +160,7 @@ fn parse_rem(input: &str) -> Result<(String, String)> {
 	};
 	// .filter(|&i| i > 0);
 
-	let val = parse_val(&rest[i..])?.trim().to_string();
+	let val = parse_val(&rest[i..])?;
 	Ok((key, val))
 }
 
