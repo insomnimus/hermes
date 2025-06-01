@@ -134,7 +134,7 @@ fn parse_rem(input: &str) -> Result<(String, String)> {
 	};
 	// .filter(|&i| i > 0);
 
-	let val = parse_val(&rest[i..])?;
+	let val = parse_val(&rest[i..])?.trim().to_string();
 	Ok((key, val))
 }
 
